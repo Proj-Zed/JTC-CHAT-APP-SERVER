@@ -7,7 +7,7 @@ const { promisify } = require("util");
 const mailService = require("../services/mailer");
 
 const signToken = (userId) =>
-jwt.sign({ userId }, process.env.CJ_POGI_SECRET_KEY);
+  jwt.sign({ userId }, process.env.CJ_POGI_SECRET_KEY);
 
 exports.register = async (req, res, next) => {
   const { firstName, lastName, email, password } = req.body;
@@ -53,7 +53,6 @@ exports.sendOTP = async (req, res, next) => {
 
   const new_otp = "010724";
 
-
   const otp_expiry_time = Date.now() + 10 * 60 * 1000; // 10mins after otp is sent
 
   await User.findByIdAndUpdate(userId, {
@@ -84,7 +83,6 @@ exports.verifyOTP = async (req, res, next) => {
     // otp_expiry_time: { $gt: Date.now() },
   });
 
-
   if (!user) {
     return res.status(400).json({
       status: "error",
@@ -94,11 +92,10 @@ exports.verifyOTP = async (req, res, next) => {
 
   // Convert provided OTP to integer
   //const providedOTP = parseInt(otp);
-  
+
   //console.log(typeof user.otp)
   //console.log(typeof otp)
-  if(user.otp != otp)
-  {
+  if (user.otp != otp) {
     return res.status(400).json({
       status: "error",
       message: "OTP is incorrect!",
@@ -124,6 +121,7 @@ exports.verifyOTP = async (req, res, next) => {
     status: "success",
     message: "Verified Successfully!",
     token,
+    user_id: user._id,
   });
 };
 
@@ -143,7 +141,10 @@ exports.login = async (req, res, next) => {
   const userDoc = await User.findOne({ email: email }).select("+password");
 
   // if the user does not exist or password is incorrect, send error response
-  if (!userDoc || !(await userDoc.correctPassword(password, userDoc.password))) {
+  if (
+    !userDoc ||
+    !(await userDoc.correctPassword(password, userDoc.password))
+  ) {
     return res.status(400).json({
       status: "error",
       message: "Email or password is incorrect!",
@@ -158,6 +159,7 @@ exports.login = async (req, res, next) => {
     status: "success",
     message: "Logged in Successfully!",
     token,
+    user_id: userDoc._id,
   });
 };
 
@@ -215,7 +217,6 @@ exports.forgotPassword = async (req, res, next) => {
       status: "error",
       message: "There is no user with given email address",
     });
-   
   }
 
   // Generate the random reset token for the url/Params
@@ -248,13 +249,11 @@ exports.forgotPassword = async (req, res, next) => {
 };
 
 exports.resetPassword = async (req, res, next) => {
- 
   // Get user based on token
   const hashedToken = crypto
     .createHash("sha256")
     .update(req.body.token)
     .digest("hex");
-
 
   const user = await User.findOne({
     passwordResetToken: hashedToken,
