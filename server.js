@@ -13,13 +13,14 @@ process.on("uncaughtException", (err) => {
 
 const http = require("http");
 const FriendRequest = require("./models/friendRequest");
+const OneToOneMessage = require("./models/OneToOneMessage");
 
 //Create Server
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: "http://192.168.8.63:3000",
     methods: ["GET", "POST"],
   },
 });
@@ -80,6 +81,7 @@ io.on("connection", async (socket) => {
       message: "Request Sent Successfully",
     });
   });
+
   socket.on("accept_request", async (data) => {
     //console.log(data);
     const request_doc = await FriendRequest.findById(data.request_id);
@@ -106,23 +108,91 @@ io.on("connection", async (socket) => {
     });
   });
 
-  //To handle text/link messages
-  socket.on("text_message", (data) => {
-    console.log("Received message", data)
+  socket.on("get_direct_conversations", async ({ user_id }, callback) => {
+    const existing_conversations = await OneToOneMessage.find({
+      participants: { $all: [user_id] },
+    }).populate("participants", "firstName lastName _id email status");
 
-    //Data: {to, from, text}
+    console.log(existing_conversations);
+
+    callback(existing_conversations);
+  });
+
+  socket.on("start_conversation", async (data) => {
+    //data {to, from}
+
+    const { to, from } = data;
+    //check if ther is any existing conversation between these users
+    const existing_conversation = await OneToOneMessage.find({
+      participants: { $size: 2, $all: [to, from] },
+    }).populate("participants", "firstName lastName _id email status");
+
+    console.log(existing_conversation[0], "Existing Conversation");
+
+    //if no existing conversation
+    if (existing_conversation.length === 0) {
+      let new_chat = await OneToOneMessage.create({
+        participants: [to, from],
+      });
+
+      new_chat = await OneToOneMessage.findById(new_chat._id).populate(
+        "participants",
+        "firstName lastName _id email status"
+      );
+
+      console.log(new_chat);
+      socket.emit("start_chat", new_chat);
+
+      // If there is existing_conversation
+    } else {
+      socket.emit("start_chat", existing_conversation[0]);
+    }
+  });
+
+  socket.on("get_messages", async (data, callback) => {
+    const { messages } = await OneToOneMessage.findById(
+      data.conversation_id
+    ).select("messages");
+    callback(messages);
+  });
+
+  //To handle text/link messages
+  socket.on("text_message", async (data) => {
+    console.log("Received message", data);
+
+    //Data: {to, from, message, conversation_id, type}
+    const {to, from, message, conversation_id, type} = data;
+    const to_user = await User.findById(to);
+    const from_user = await User.findById(from);
+    const new_message = {
+      to,
+      from,
+      type,
+      text: message,
+      created_at: Date.now()
+    }
 
     //Create new conversation if its not existing or add new message to the messages list
-
+    const chat = await OneToOneMessage.findById(conversation_id);
+    chat.messages.push(new_message)
     // Save to db
+    await chat.save({});
 
-    //emit incoming_message -> to user
+    //emit new_message -> to user
+    io.to(to_user.socket_id).emit("new_message", {
+      conversation_id,
+      message: new_message,
+    })
 
-    //emit outgoing message -> from user
+    //emit new_message  -> from user
+    io.to(from_user.socket_id).emit("new_message", {
+      conversation_id,
+      message: new_message,
+    })
   });
 
   socket.on("file_message", (data) => {
-    console.log("Received message", data)
+    console.log("Received message", data);
 
     // data: {to, from, text, file}
 
@@ -130,7 +200,9 @@ io.on("connection", async (socket) => {
     const fileExtention = path.extname(data.file.name);
 
     //generate a unique file name
-    const fileName = `${Date.now()}_${Math.floor(Math.random() * 10000)}${fileExtention}`;
+    const fileName = `${Date.now()}_${Math.floor(
+      Math.random() * 10000
+    )}${fileExtention}`;
 
     //Upload file to aws s3 or multer
 
@@ -141,7 +213,7 @@ io.on("connection", async (socket) => {
     //emit incoming_message -> to user
 
     //emit outgoing message -> from user
-  })
+  });
 
   socket.on("end", async (data) => {
     //Find user by Id and set the status to offline
